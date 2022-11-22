@@ -1,0 +1,134 @@
+/*
+ COM.CPP
+*/
+
+#define DEF_CPP_COM          "COM.CPP"
+
+#include <stdio.h>
+#include <conio.h>
+#include <alloc.h>
+#include <dos.h>
+#include <memory.h>
+
+#include "MAIN.H"
+#include "COM.H"
+
+#define DEF_SIZE_COM_Buffer  0x1000
+
+void interrupt COM_Handle(void);
+void COM_Open(int, int, int, int, long);
+void COM_Close(void);
+int COM_IsReady(void);
+void COM_Put(int);
+int COM_Get(void);
+void COM_PutN(void far *, int);
+void COM_GetN(void far *, int);
+
+int g_COM_BasePort, g_COM_Interrupt, g_COM_MaskON, g_COM_MaskOFF;
+int g_COM_First, g_COM_Last;
+char far *g_COM_Buffer;
+void interrupt (far *g_COM_OldHandle)(void);
+
+void interrupt COM_Handle(void)
+{
+ int s_byte;
+           if(g_COM_Last==DEF_SIZE_COM_Buffer)g_COM_Last=0;
+           s_byte=inportb(g_COM_BasePort);
+           if(s_byte)*(g_COM_Buffer + g_COM_Last++)=(char)s_byte;
+           outportb(0x20, 0x20);
+           //g_COM_OldHandle();
+}
+
+void COM_Open(int s_port, int s_databit, int s_stopbit, int s_parity, long s_baud)
+{
+ struct ts_vect{void far *vect;} far *s_vect;
+ unsigned int s_div=(unsigned int)(1843200LU/((unsigned long)s_baud<<4LU));
+           switch(s_port)
+           {
+            case 0: /* COM #1 */
+                 g_COM_BasePort=0x03f8; g_COM_Interrupt=0x000c; g_COM_MaskON=0x00ef;   g_COM_MaskOFF=0x0010;
+                 break;
+            case 1: /* COM #2 */
+                 g_COM_BasePort=0x02f8; g_COM_Interrupt=0x000b; g_COM_MaskON=0x00f7;   g_COM_MaskOFF=0x0008;
+                 break;
+            case 2: /* COM #3 */
+                 g_COM_BasePort=0x03e8; g_COM_Interrupt=0x000c; g_COM_MaskON=0x00ef;   g_COM_MaskOFF=0x0010;
+                 break;
+            case 3: /* COM #4 */
+                 g_COM_BasePort=0x02e8; g_COM_Interrupt=0x000b; g_COM_MaskON=0x00f7;   g_COM_MaskOFF=0x0008;
+                 break;
+            default:
+                 printf("Initialize COM port error!!!\n");
+                 break;
+           }
+           outportb(g_COM_BasePort + 3, s_databit | (s_stopbit << 2) | (s_parity << 5));
+           outportb(g_COM_BasePort + 3, inportb(g_COM_BasePort + 3) | 0x0080);
+           outportb(g_COM_BasePort, s_div & 0x00ff);
+           outportb(g_COM_BasePort + 1, (s_div >> 8) & 0x00ff);
+           outportb(g_COM_BasePort + 3, inportb(g_COM_BasePort + 3) & 0x007f);
+           outportb(g_COM_BasePort + 4, 0x000b);
+           outportb(g_COM_BasePort + 1, 0x0001);
+           g_COM_First=g_COM_Last=0;
+           g_COM_Buffer=(char far *)farmalloc(DEF_SIZE_COM_Buffer);
+           memset(g_COM_Buffer, '\0', DEF_SIZE_COM_Buffer);
+           s_vect=(struct ts_vect far *)(g_COM_Interrupt << 2);
+           (void far *)g_COM_OldHandle=(void far *)s_vect->vect;
+           s_vect->vect=COM_Handle;
+           outportb(g_COM_BasePort + 6, inportb(g_COM_BasePort + 6) | 0x0030);
+           outportb(0x0021, inportb(0x0021) & g_COM_MaskON);
+           delay(200);
+           inportb(g_COM_BasePort);
+           inportb(g_COM_BasePort);
+}
+
+void COM_Close(void)
+{
+ struct ts_vect{void far *vect;} far *s_vect=(struct ts_vect far *)(g_COM_Interrupt << 2);
+           outportb(g_COM_BasePort + 1, 0x0000);
+           outportb(0x0021, inportb(0x0021) | g_COM_MaskOFF);
+           s_vect->vect=g_COM_OldHandle;
+           farfree(g_COM_Buffer);
+}
+
+int COM_IsReady(void)
+{
+           if(g_COM_First==g_COM_Last)return(0);
+           return(1);
+}
+
+void COM_Put(int s_byte)
+{
+ int s_comp, s_timeout=0xffff;
+           do
+           {
+            if(!s_timeout--)
+            {
+             printf("Time out COM port!!! - Write\n");
+             break;
+            }
+            s_comp=inportb(g_COM_BasePort + 5) & 0x0020;
+           }while(!s_comp);
+           outportb(g_COM_BasePort, s_byte&0x00ff);
+}
+
+int COM_Get(void)
+{
+           if(COM_IsReady())
+           {
+            if(g_COM_First==DEF_SIZE_COM_Buffer)g_COM_First=0;
+            return((int)(*(g_COM_Buffer+g_COM_First++)));
+           }
+           return(0);
+}
+
+void COM_PutN(void far *s_buffer, int s_count)
+{
+           while(s_count--)COM_Put((int)(*(((char far *)s_buffer)++)));
+}
+
+void COM_GetN(void far *s_buffer, int s_count)
+{
+           while(s_count--)*(((char far *)s_buffer)++)=(char)COM_Get();
+}
+
+/* End of source */

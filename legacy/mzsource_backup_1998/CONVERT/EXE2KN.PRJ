@@ -1,0 +1,9 @@
+exe2kn.c
+standard.c
+selectos.c
+text.c
+tty.c
+hard.c
+floppy.c
+disk.c
+dos.obj
